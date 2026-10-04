@@ -1,0 +1,511 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drone3D Viewer</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: #0f1419; --panel: #171e26; --line: #2a3542; --text: #e6edf3; --muted: #8b98a5;
+    --accent: #3fb6a8; --warn: #e3b341; --bad: #f85149;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  #app { display: grid; grid-template-columns: 1fr 340px; height: 100%; }
+  #view { position: relative; overflow: hidden; }
+  canvas { display: block; }
+  aside { background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; padding: 14px; }
+  h1 { font-size: 15px; margin: 0 0 2px; }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
+    margin: 18px 0 8px; }
+  .sub { color: var(--muted); font-size: 12px; }
+  .tools { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  button { background: #222c37; color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+    padding: 7px 6px; font: inherit; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.active { background: var(--accent); color: #062420; border-color: var(--accent); font-weight: 600; }
+  .row { display: flex; gap: 6px; align-items: center; margin: 6px 0; flex-wrap: wrap; }
+  label { color: var(--muted); }
+  select, input[type=range] { accent-color: var(--accent); }
+  select { background: #222c37; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px; }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 3px 0; border-bottom: 1px solid #202a35; vertical-align: top; }
+  td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+  .m { background: #1d2630; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 6px; }
+  .m b { color: var(--accent); }
+  .m .x { float: right; color: var(--muted); cursor: pointer; border: 0; background: none; padding: 0; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; }
+  .pill.ok { background: #12392f; color: #56d4b3; } .pill.warn { background: #3d3214; color: var(--warn); }
+  #hint { position: absolute; left: 12px; bottom: 12px; background: rgba(15,20,25,.85); border: 1px solid var(--line);
+    border-radius: 8px; padding: 8px 12px; max-width: 70%; pointer-events: none; }
+  #status { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 15px; }
+  #coords { position: absolute; right: 12px; top: 12px; background: rgba(15,20,25,.85); border: 1px solid var(--line);
+    border-radius: 8px; padding: 6px 10px; font-variant-numeric: tabular-nums; font-size: 12px; display: none; }
+  a { color: var(--accent); }
+  .downloads a { display: inline-block; margin: 2px 8px 2px 0; }
+  .lbl { position: absolute; transform: translate(-50%, -130%); background: rgba(15,20,25,.9); color: var(--text);
+    border: 1px solid var(--accent); border-radius: 6px; padding: 1px 6px; font-size: 12px; white-space: nowrap;
+    pointer-events: none; font-variant-numeric: tabular-nums; }
+  @media (max-width: 800px) { #app { grid-template-columns: 1fr; grid-template-rows: 60% 40%; }
+    aside { border-left: 0; border-top: 1px solid var(--line); } }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "./vendor/three.module.min.js",
+  "three/addons/": "./vendor/"
+} }
+</script>
+</head>
+<body>
+<div id="app">
+  <div id="view">
+    <div id="status">Loading model…</div>
+    <div id="coords"></div>
+    <div id="hint">Drag to orbit · right-drag to pan · scroll to zoom. Pick a tool to measure.</div>
+  </div>
+  <aside>
+    <h1 id="title">Drone3D model</h1>
+    <div class="sub" id="subtitle"></div>
+
+    <h2>Measure</h2>
+    <div class="tools">
+      <button data-tool="point">Point</button>
+      <button data-tool="distance">Distance</button>
+      <button data-tool="height">Height</button>
+      <button data-tool="area">Area</button>
+      <button data-tool="volume">Volume</button>
+      <button id="clear">Clear all</button>
+    </div>
+    <div id="measurements" style="margin-top:10px"></div>
+    <div class="row"><button id="export-csv">Export CSV</button><button id="export-geojson">Export GeoJSON</button></div>
+
+    <h2>Display</h2>
+    <div class="row"><label>Colour</label>
+      <select id="colour"><option value="rgb">Photo</option><option value="height">Elevation</option></select>
+      <label>Size</label><input id="size" type="range" min="0.5" max="6" step="0.1" value="1.6">
+    </div>
+    <div class="row">
+      <button id="top">Top view</button><button id="reset">Reset view</button>
+      <label><input id="show-cams" type="checkbox" checked> Cameras</label>
+    </div>
+
+    <h2>Accuracy</h2>
+    <div id="accuracy"></div>
+
+    <h2>Processing report</h2>
+    <table id="report"></table>
+
+    <h2>Downloads</h2>
+    <div class="downloads" id="downloads"></div>
+  </aside>
+</div>
+
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { PLYLoader } from "three/addons/loaders/PLYLoader.js";
+
+const params = new URLSearchParams(location.search);
+const sceneUrl = params.get("scene") || "scene.json";
+const base = sceneUrl.substring(0, sceneUrl.lastIndexOf("/") + 1);
+const $ = (s) => document.querySelector(s);
+
+// ---------------------------------------------------------------- geodesy
+const A = 6378137.0, F = 1 / 298.257223563, E2 = F * (2 - F);
+function geoToEcef(lat, lon, h) {
+  const la = lat * Math.PI / 180, lo = lon * Math.PI / 180, s = Math.sin(la);
+  const n = A / Math.sqrt(1 - E2 * s * s);
+  return [(n + h) * Math.cos(la) * Math.cos(lo), (n + h) * Math.cos(la) * Math.sin(lo), (n * (1 - E2) + h) * s];
+}
+function enuToGeo(o, e, n, u) {
+  const la = o.lat * Math.PI / 180, lo = o.lon * Math.PI / 180;
+  const [x0, y0, z0] = geoToEcef(o.lat, o.lon, o.h || 0);
+  const x = x0 - Math.sin(lo) * e - Math.sin(la) * Math.cos(lo) * n + Math.cos(la) * Math.cos(lo) * u;
+  const y = y0 + Math.cos(lo) * e - Math.sin(la) * Math.sin(lo) * n + Math.cos(la) * Math.sin(lo) * u;
+  const z = z0 + Math.cos(la) * n + Math.sin(la) * u;
+  const lon = Math.atan2(y, x), p = Math.hypot(x, y);
+  let lat = Math.atan2(z, p * (1 - E2)), h = 0;
+  for (let i = 0; i < 5; i++) {
+    const N = A / Math.sqrt(1 - E2 * Math.sin(lat) ** 2);
+    h = p / Math.cos(lat) - N;
+    lat = Math.atan2(z, p * (1 - E2 * N / (N + h)));
+  }
+  return { lat: lat * 180 / Math.PI, lon: lon * 180 / Math.PI, h };
+}
+
+// ---------------------------------------------------------------- three setup
+const view = $("#view");
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+view.prepend(renderer.domElement);
+const scene3 = new THREE.Scene();
+scene3.background = new THREE.Color(0x0f1419);
+const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 5000);
+camera.up.set(0, 0, 1);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+const overlay = new THREE.Group(); scene3.add(overlay);
+const camGroup = new THREE.Group(); scene3.add(camGroup);
+
+function resize() {
+  const r = view.getBoundingClientRect();
+  renderer.setSize(r.width, r.height);
+  camera.aspect = r.width / r.height; camera.updateProjectionMatrix();
+}
+addEventListener("resize", resize); resize();
+
+let meta, cloud, positions, rgbColors, heightColors, bbox, accuracy;
+
+async function load() {
+  meta = await (await fetch(sceneUrl)).json();
+  accuracy = meta.accuracy || {};
+  const geom = await new PLYLoader().loadAsync(base + (meta.cloud || "cloud.ply"));
+  positions = geom.attributes.position.array;
+  geom.computeBoundingBox(); bbox = geom.boundingBox;
+  rgbColors = geom.attributes.color ? geom.attributes.color.array.slice() : null;
+  heightColors = elevationColours(positions, bbox);
+  if (!rgbColors) rgbColors = heightColors;
+  geom.setAttribute("color", new THREE.BufferAttribute(rgbColors.slice(), 3));
+  const mat = new THREE.PointsMaterial({ size: 1.6, vertexColors: true, sizeAttenuation: false });
+  cloud = new THREE.Points(geom, mat);
+  scene3.add(cloud);
+  drawCameras();
+  resetView();
+  $("#status").remove();
+  fillPanel();
+}
+
+function elevationColours(pos, bb) {
+  const out = new Float32Array(pos.length);
+  const lo = bb.min.z, span = Math.max(bb.max.z - lo, 1e-3);
+  const stops = [[0.19, 0.07, 0.23], [0.16, 0.47, 0.92], [0.12, 0.85, 0.68], [0.85, 0.89, 0.22], [0.98, 0.42, 0.08], [0.6, 0.05, 0.02]];
+  for (let i = 0; i < pos.length; i += 3) {
+    const t = Math.min(Math.max((pos[i + 2] - lo) / span, 0), 1) * (stops.length - 1);
+    const k = Math.min(Math.floor(t), stops.length - 2), f = t - k;
+    for (let c = 0; c < 3; c++) out[i + c] = stops[k][c] * (1 - f) + stops[k + 1][c] * f;
+  }
+  return out;
+}
+
+function drawCameras() {
+  const cams = meta.cameras || [];
+  if (!cams.length) return;
+  const pts = cams.map((c) => new THREE.Vector3(...c.center));
+  camGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
+    new THREE.LineBasicMaterial({ color: 0xe3b341 })));
+  const g = new THREE.BufferGeometry().setFromPoints(pts);
+  camGroup.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0xffd866, size: 6, sizeAttenuation: false })));
+}
+
+function resetView() {
+  const c = new THREE.Vector3(); bbox.getCenter(c);
+  const size = bbox.getSize(new THREE.Vector3()).length();
+  controls.target.copy(c);
+  camera.position.set(c.x - size * 0.45, c.y - size * 0.55, c.z + size * 0.5);
+  camera.far = size * 20; camera.updateProjectionMatrix();
+}
+function topView() {
+  const c = new THREE.Vector3(); bbox.getCenter(c);
+  const size = bbox.getSize(new THREE.Vector3()).length();
+  controls.target.copy(c);
+  camera.position.set(c.x, c.y - 0.001, c.z + size * 0.9);
+}
+
+// ---------------------------------------------------------------- picking
+const ray = new THREE.Raycaster();
+function pick(ev) {
+  const r = renderer.domElement.getBoundingClientRect();
+  const ndc = new THREE.Vector2(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const dist = camera.position.distanceTo(controls.target);
+  ray.params.Points.threshold = Math.max(dist * 0.01, 0.05);
+  const hits = ray.intersectObject(cloud);
+  if (!hits.length) return null;
+  // Of the points under the cursor, take the one nearest the camera.
+  hits.sort((a, b) => a.distance - b.distance);
+  const i = hits[0].index * 3;
+  return new THREE.Vector3(positions[i], positions[i + 1], positions[i + 2]);
+}
+
+// ---------------------------------------------------------------- measurement tools
+let tool = null, pending = [], tempGroup = null;
+const measurements = [];
+const labels = [];
+document.querySelectorAll("[data-tool]").forEach((b) => b.addEventListener("click", () => setTool(b.dataset.tool)));
+function setTool(t) {
+  tool = tool === t ? null : t; pending = []; clearTemp();
+  document.querySelectorAll("[data-tool]").forEach((b) => b.classList.toggle("active", b.dataset.tool === tool));
+  const hints = {
+    point: "Click a point to read its coordinates.",
+    distance: "Click two points. Shows 3D, horizontal and vertical distance.",
+    height: "Click a base point, then a top point.",
+    area: "Click polygon corners; double-click (or Enter) to finish.",
+    volume: "Outline the stockpile; double-click (or Enter) to finish. Base = plane through the outline.",
+  };
+  $("#hint").textContent = tool ? hints[tool] : "Drag to orbit · right-drag to pan · scroll to zoom. Pick a tool to measure.";
+}
+
+let downAt = null;
+renderer.domElement.addEventListener("pointerdown", (e) => { downAt = [e.clientX, e.clientY]; });
+renderer.domElement.addEventListener("pointerup", (e) => {
+  if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 4 || e.button !== 0) return;
+  if (!tool) return;
+  const p = pick(e);
+  if (!p) return;
+  pending.push(p); drawTemp();
+  if (tool === "point") finish();
+  if ((tool === "distance" || tool === "height") && pending.length === 2) finish();
+});
+renderer.domElement.addEventListener("dblclick", () => { if ((tool === "area" || tool === "volume") && pending.length >= 3) finish(); });
+addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && (tool === "area" || tool === "volume") && pending.length >= 3) finish();
+  if (e.key === "Escape") { pending = []; clearTemp(); }
+});
+renderer.domElement.addEventListener("pointermove", (e) => {
+  if (!cloud || !meta.georeferenced) return;
+  if (e.buttons) return;
+  const p = tool ? pick(e) : null;
+  const box = $("#coords");
+  if (!p) { box.style.display = "none"; return; }
+  const g = enuToGeo(meta.origin, p.x, p.y, p.z);
+  box.style.display = "block";
+  box.textContent = `${g.lat.toFixed(7)}°, ${g.lon.toFixed(7)}°  ·  z ${p.z.toFixed(2)} m`;
+});
+
+function clearTemp() { if (tempGroup) { overlay.remove(tempGroup); tempGroup = null; } }
+function drawTemp() {
+  clearTemp(); tempGroup = new THREE.Group(); overlay.add(tempGroup);
+  tempGroup.add(markers(pending, 0xffffff));
+  if (pending.length > 1) tempGroup.add(polyline(pending, tool === "area" || tool === "volume", 0xffffff));
+}
+function markers(pts, color) {
+  return new THREE.Points(new THREE.BufferGeometry().setFromPoints(pts),
+    new THREE.PointsMaterial({ color, size: 10, sizeAttenuation: false, depthTest: false }));
+}
+function polyline(pts, closed, color) {
+  const p = closed ? [...pts, pts[0]] : pts;
+  const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints(p),
+    new THREE.LineBasicMaterial({ color, depthTest: false }));
+  l.renderOrder = 10; return l;
+}
+
+const rel = () => accuracy.relative_point_m ?? 0.1;
+const pct = () => accuracy.length_error_percent ?? 1;
+function lengthErr(L) { return Math.SQRT2 * rel() + L * pct() / 100; }
+const fmt = (v, d = 2) => Number(v).toFixed(d);
+
+function finish() {
+  const pts = pending.slice(); pending = []; clearTemp();
+  let m;
+  if (tool === "point") {
+    const p = pts[0], g = meta.georeferenced ? enuToGeo(meta.origin, p.x, p.y, p.z) : null;
+    m = { type: "point", pts, values: { e: p.x, n: p.y, z: p.z, ...(g ? { lat: g.lat, lon: g.lon } : {}) },
+      text: g ? `<b>${g.lat.toFixed(7)}, ${g.lon.toFixed(7)}</b><br>z ${fmt(p.z)} m above take-off` :
+        `<b>${fmt(p.x)}, ${fmt(p.y)}, ${fmt(p.z)}</b>`, label: `${fmt(p.z)} m` };
+  } else if (tool === "distance") {
+    const [a, b] = pts, d = a.distanceTo(b), h = Math.hypot(b.x - a.x, b.y - a.y), v = b.z - a.z;
+    m = { type: "distance", pts, values: { slope_m: d, horizontal_m: h, vertical_m: v, error_m: lengthErr(d) },
+      text: `<b>${fmt(d)} m</b> ± ${fmt(lengthErr(d))}<br>horizontal ${fmt(h)} m · vertical ${fmt(v)} m`, label: `${fmt(d)} m` };
+  } else if (tool === "height") {
+    const [a, b] = pts, v = b.z - a.z;
+    m = { type: "height", pts, values: { height_m: v, error_m: lengthErr(Math.abs(v)) },
+      text: `<b>${fmt(v)} m</b> ± ${fmt(lengthErr(Math.abs(v)))}`, label: `Δz ${fmt(v)} m` };
+  } else if (tool === "area") {
+    const area = shoelace(pts), per = perimeter(pts);
+    const err = per * lengthErr(Math.sqrt(area)) ;
+    m = { type: "area", pts, values: { area_m2: area, perimeter_m: per, error_m2: err },
+      text: `<b>${fmt(area, 1)} m²</b> ± ${fmt(err, 1)}<br>perimeter ${fmt(per)} m`, label: `${fmt(area, 1)} m²` };
+  } else if (tool === "volume") {
+    const v = volume(pts);
+    m = { type: "volume", pts, values: v,
+      text: `<b>${fmt(v.cut_m3, 1)} m³</b> above base · fill ${fmt(v.fill_m3, 1)} m³<br>` +
+        `area ${fmt(v.area_m2, 1)} m² · coverage ${fmt(100 * v.coverage, 0)}%`, label: `${fmt(v.cut_m3, 1)} m³` };
+  }
+  m.id = Date.now() + Math.random();
+  m.group = new THREE.Group();
+  m.group.add(markers(pts, 0x3fb6a8));
+  if (pts.length > 1) m.group.add(polyline(pts, m.type === "area" || m.type === "volume", 0x3fb6a8));
+  if (m.type === "height") {
+    const a = pts[0], b = pts[1], c = new THREE.Vector3(a.x, a.y, b.z);
+    m.group.add(polyline([a, c, b], false, 0xe3b341));
+  }
+  overlay.add(m.group);
+  const centroid = pts.reduce((s, p) => s.add(p), new THREE.Vector3()).divideScalar(pts.length);
+  const el = document.createElement("div"); el.className = "lbl"; el.innerHTML = m.label; view.append(el);
+  m.labelEl = el; m.anchor = centroid;
+  measurements.push(m); renderList();
+}
+
+function shoelace(p) { let s = 0; for (let i = 0; i < p.length; i++) { const a = p[i], b = p[(i + 1) % p.length]; s += a.x * b.y - b.x * a.y; } return Math.abs(s) / 2; }
+function perimeter(p) { let s = 0; for (let i = 0; i < p.length; i++) { const a = p[i], b = p[(i + 1) % p.length]; s += Math.hypot(b.x - a.x, b.y - a.y); } return s; }
+function inside(x, y, poly) {
+  let c = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i], b = poly[j];
+    if ((a.y > y) !== (b.y > y) && x < (b.x - a.x) * (y - a.y) / (b.y - a.y) + a.x) c = !c;
+  }
+  return c;
+}
+
+// Stockpile volume: top surface = highest point per grid cell; base = plane
+// fitted (least squares) to the surface along the outline.
+function volume(poly) {
+  const cell = 0.25, pad = 1.0;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const p of poly) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
+  x0 -= pad; y0 -= pad; x1 += pad; y1 += pad;
+  const W = Math.ceil((x1 - x0) / cell), H = Math.ceil((y1 - y0) / cell);
+  const top = new Float32Array(W * H).fill(NaN);
+  for (let i = 0; i < positions.length; i += 3) {
+    const x = positions[i], y = positions[i + 1];
+    if (x < x0 || x >= x1 || y < y0 || y >= y1) continue;
+    const k = Math.floor((y - y0) / cell) * W + Math.floor((x - x0) / cell);
+    const z = positions[i + 2];
+    if (!(top[k] >= z)) top[k] = z;
+  }
+  const sample = (x, y) => {
+    const cx = Math.floor((x - x0) / cell), cy = Math.floor((y - y0) / cell);
+    const zs = [];
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+      const X = cx + dx, Y = cy + dy; if (X < 0 || Y < 0 || X >= W || Y >= H) continue;
+      const z = top[Y * W + X]; if (!isNaN(z)) zs.push(z);
+    }
+    if (!zs.length) return NaN; zs.sort((a, b) => a - b); return zs[zs.length >> 1];
+  };
+  // Least-squares plane z = a x + b y + c through outline samples.
+  const S = [[0, 0, 0], [0, 0, 0], [0, 0, 0]], r = [0, 0, 0];
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i], b = poly[(i + 1) % poly.length];
+    const n = Math.max(2, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 0.5));
+    for (let k = 0; k < n; k++) {
+      const x = a.x + (b.x - a.x) * k / n, y = a.y + (b.y - a.y) * k / n, z = sample(x, y);
+      if (isNaN(z)) continue;
+      const v = [x, y, 1];
+      for (let p = 0; p < 3; p++) { r[p] += v[p] * z; for (let q = 0; q < 3; q++) S[p][q] += v[p] * v[q]; }
+    }
+  }
+  const coef = solve3(S, r);
+  let cut = 0, fill = 0, cells = 0, valid = 0;
+  for (let Y = 0; Y < H; Y++) for (let X = 0; X < W; X++) {
+    const x = x0 + (X + 0.5) * cell, y = y0 + (Y + 0.5) * cell;
+    if (!inside(x, y, poly)) continue;
+    cells++;
+    const z = top[Y * W + X]; if (isNaN(z)) continue;
+    valid++;
+    const d = z - (coef[0] * x + coef[1] * y + coef[2]);
+    if (d > 0) cut += d; else fill -= d;
+  }
+  // Empty cells get the mean of measured ones (reported as coverage).
+  const scale = valid ? cells / valid : 0;
+  return { cut_m3: cut * cell * cell * scale, fill_m3: fill * cell * cell * scale, area_m2: cells * cell * cell,
+    coverage: cells ? valid / cells : 0, base: "plane fitted to outline" };
+}
+function solve3(M, b) {
+  const m = M.map((row, i) => [...row, b[i]]);
+  for (let c = 0; c < 3; c++) {
+    let p = c; for (let r = c + 1; r < 3; r++) if (Math.abs(m[r][c]) > Math.abs(m[p][c])) p = r;
+    [m[c], m[p]] = [m[p], m[c]];
+    if (Math.abs(m[c][c]) < 1e-12) return [0, 0, 0];
+    for (let r = 0; r < 3; r++) if (r !== c) { const f = m[r][c] / m[c][c]; for (let k = c; k < 4; k++) m[r][k] -= f * m[c][k]; }
+  }
+  return [m[0][3] / m[0][0], m[1][3] / m[1][1], m[2][3] / m[2][2]];
+}
+
+function renderList() {
+  const box = $("#measurements"); box.innerHTML = "";
+  if (!measurements.length) { box.innerHTML = '<div class="sub">No measurements yet.</div>'; return; }
+  measurements.forEach((m, i) => {
+    const d = document.createElement("div"); d.className = "m";
+    d.innerHTML = `<button class="x" title="remove">✕</button>${i + 1}. ${m.type}<br>${m.text}`;
+    d.querySelector(".x").onclick = () => { overlay.remove(m.group); m.labelEl.remove(); measurements.splice(measurements.indexOf(m), 1); renderList(); };
+    box.append(d);
+  });
+}
+$("#clear").onclick = () => { measurements.splice(0).forEach((m) => { overlay.remove(m.group); m.labelEl.remove(); }); renderList(); };
+
+function download(name, text, type) {
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click();
+}
+$("#export-csv").onclick = () => {
+  const rows = ["id,type,key,value"];
+  measurements.forEach((m, i) => Object.entries(m.values).forEach(([k, v]) => rows.push(`${i + 1},${m.type},${k},${typeof v === "number" ? v.toFixed(6) : v}`)));
+  download("measurements.csv", rows.join("\n"), "text/csv");
+};
+$("#export-geojson").onclick = () => {
+  const toLL = (p) => { const g = enuToGeo(meta.origin, p.x, p.y, p.z); return [g.lon, g.lat, p.z]; };
+  const feats = measurements.map((m) => {
+    const c = m.pts.map(toLL);
+    const geometry = m.type === "point" ? { type: "Point", coordinates: c[0] } :
+      (m.type === "area" || m.type === "volume") ? { type: "Polygon", coordinates: [[...c, c[0]]] } : { type: "LineString", coordinates: c };
+    return { type: "Feature", geometry, properties: { type: m.type, ...m.values } };
+  });
+  download("measurements.geojson", JSON.stringify({ type: "FeatureCollection", features: feats }, null, 1), "application/geo+json");
+};
+
+// ---------------------------------------------------------------- display + panel
+$("#size").oninput = (e) => { cloud.material.size = +e.target.value; };
+$("#colour").onchange = (e) => {
+  cloud.geometry.attributes.color.array.set(e.target.value === "height" ? heightColors : rgbColors);
+  cloud.geometry.attributes.color.needsUpdate = true;
+};
+$("#top").onclick = topView; $("#reset").onclick = resetView;
+$("#show-cams").onchange = (e) => { camGroup.visible = e.target.checked; };
+
+async function fillPanel() {
+  $("#subtitle").textContent = `${(meta.points || 0).toLocaleString()} points · ${meta.cameras?.length || 0} cameras` +
+    (meta.georeferenced ? ` · EPSG:${meta.epsg}` : " · not georeferenced");
+  const a = accuracy;
+  if (a.grade && a.grade !== "unscaled") {
+    $("#accuracy").innerHTML = `<span class="pill ${a.grade === "rtk-grade" ? "ok" : "warn"}">${a.grade}</span>
+      <table>
+      <tr><td>Relative (in-model) point</td><td>±${fmt(a.relative_point_m, 3)} m</td></tr>
+      <tr><td>Length scale error</td><td>±${fmt(a.length_error_percent, 2)} %</td></tr>
+      <tr><td>Absolute horizontal</td><td>~${fmt(a.absolute_h_m)} m</td></tr>
+      <tr><td>Absolute vertical</td><td>~${fmt(a.absolute_v_m)} m</td></tr>
+      <tr><td>Ground sample distance</td><td>${fmt(100 * a.gsd_m, 1)} cm/px</td></tr>
+      </table><p class="sub">${a.note}</p>`;
+  } else {
+    $("#accuracy").innerHTML = `<p class="sub">${a.note || "No accuracy information."}</p>`;
+  }
+  try {
+    const r = await (await fetch(base + (meta.report || "report.json"))).json();
+    const k = r.keyframes || {}, s = r.sfm || {}, g = r.georeference || {}, t = r.timings_s || {};
+    const rows = [
+      ["Video frames", k.frames_total], ["Keyframes selected", `${k.frames_selected} (${fmt(k.reduction, 1)}× fewer)`],
+      ["Selection", k.selection], ["Images registered", `${s.images_registered}/${s.images_input}`],
+      ["Sparse points", s.points3D?.toLocaleString()], ["Reprojection error", `${fmt(s.mean_reprojection_error_px)} px`],
+      ["GPS residual (h / v)", g.gps_residual_rms_h_m !== undefined ? `${fmt(g.gps_residual_rms_h_m)} / ${fmt(g.gps_residual_rms_v_m)} m` : "—"],
+      ["Auto clock sync", g.time_offset_s !== undefined ? `${g.time_offset_s >= 0 ? "+" : ""}${fmt(g.time_offset_s)} s` : "—"],
+      ["Dense method", r.dense?.method], ["Total time", `${fmt(t.total, 0)} s`],
+    ];
+    $("#report").innerHTML = rows.map(([a, b]) => `<tr><td>${a}</td><td>${b ?? "—"}</td></tr>`).join("");
+  } catch (e) { /* report optional */ }
+  $("#downloads").innerHTML = (meta.downloads || []).map((f) => `<a href="${base}${f}" download>${f}</a>`).join("");
+  renderList();
+}
+
+// ---------------------------------------------------------------- loop
+function tick() {
+  controls.update();
+  renderer.render(scene3, camera);
+  const r = renderer.domElement.getBoundingClientRect();
+  for (const m of measurements) {
+    const v = m.anchor.clone().project(camera);
+    const vis = v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1;
+    m.labelEl.style.display = vis ? "block" : "none";
+    m.labelEl.style.left = `${(v.x + 1) / 2 * r.width}px`;
+    m.labelEl.style.top = `${(1 - v.y) / 2 * r.height}px`;
+  }
+  requestAnimationFrame(tick);
+}
+// Small scripting hook for automated checks and power users (browser console).
+window.drone3d = {
+  volume: (pts) => volume(pts.map((p) => new THREE.Vector3(...p))),
+  pointCount: () => positions.length / 3,
+};
+load().then(tick).catch((e) => { $("#status").textContent = "Could not load model: " + e.message; console.error(e); });
+</script>
+</body>
+</html>
