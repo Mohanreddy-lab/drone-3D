@@ -1,0 +1,6 @@
+numpy>=1.26
+opencv-python-headless>=4.9
+pycolmap>=3.12
+pyproj>=3.6
+laspy>=2.5
+python-multipart>=0.0.9
