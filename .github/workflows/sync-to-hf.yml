@@ -1,0 +1,39 @@
+# Deploys this repo to the Hugging Face Space on every push to main.
+# Needs one repository secret: HF_TOKEN (a Hugging Face token with write access).
+name: Deploy to Hugging Face Space
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Add Space settings to README
+        run: |
+          {
+            printf -- '---\ntitle: Drone3D\nemoji: 🛰️\ncolorFrom: green\ncolorTo: blue\n'
+            printf -- 'sdk: gradio\nsdk_version: 6.29.1\napp_file: app.py\npinned: false\n---\n\n'
+            cat README.md
+          } > README.space.md
+          mv README.space.md README.md
+
+      - name: Push to Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "::error::Add a repository secret named HF_TOKEN (Settings > Secrets and variables > Actions)."
+            exit 1
+          fi
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git commit -qam "Space config for Hugging Face"
+          git push --force "https://mohanreddy1432:${HF_TOKEN}@huggingface.co/spaces/mohanreddy1432/drone-3D" HEAD:main
