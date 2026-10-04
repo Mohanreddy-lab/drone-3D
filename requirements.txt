@@ -4,3 +4,4 @@ pycolmap>=3.12
 pyproj>=3.6
 laspy>=2.5
 python-multipart>=0.0.9
+spaces

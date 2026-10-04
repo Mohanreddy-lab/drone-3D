@@ -11,6 +11,19 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
 
+# ZeroGPU hardware refuses to start a Space with no @spaces.GPU function.
+# drone3d runs on the CPU, so this placeholder exists only to pass that check;
+# off ZeroGPU (locally, CPU Spaces) the `spaces` package is optional.
+try:
+    import spaces  # noqa: E402
+
+    @spaces.GPU
+    def _zerogpu_placeholder() -> bool:
+        return True
+
+except ImportError:
+    spaces = None
+
 import gradio as gr  # noqa: E402
 import uvicorn  # noqa: E402
 
