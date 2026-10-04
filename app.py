@@ -11,6 +11,11 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
 
+# Spaces turn on Gradio's SSR mode (GRADIO_SSR_MODE=true): a Node server then
+# owns the port and renders "/" itself, so drone3d's pages are never reached.
+# drone3d needs the plain Python server, so force SSR off before Gradio loads.
+os.environ["GRADIO_SSR_MODE"] = "false"
+
 # ZeroGPU hardware refuses to start a Space with no @spaces.GPU function.
 # drone3d runs on the CPU, so this placeholder exists only to pass that check;
 # off ZeroGPU (locally, CPU Spaces) the `spaces` package is optional.
@@ -60,4 +65,5 @@ if __name__ == "__main__":
     demo.launch(
         server_name="0.0.0.0",
         server_port=int(os.environ.get("GRADIO_SERVER_PORT", os.environ.get("PORT", 7860))),
+        ssr_mode=False,
     )
